@@ -1,0 +1,52 @@
+[project]
+name = 'plan-rect'
+description = 'Rectify oblique images to a planar surface'
+readme = 'README.md'
+requires-python = '>=3.9'
+dependencies = ['orthority>=0.5.1']
+authors = [
+    { name = 'Leftfield Geospatial', email = 'info@leftfield.online' }
+]
+license = { text = 'AGPL-3.0-or-later' }
+keywords = ['planar', 'orthorectification']
+classifiers = [
+    'Programming Language :: Python :: 3',
+    'License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)',
+    'Operating System :: OS Independent',
+]
+dynamic = ['version']
+
+[project.scripts]
+plan-rect = 'plan_rect.cli:cli'
+
+[project.optional-dependencies]
+tests = ['pytest']
+
+[project.urls]
+Homepage = 'https://github.com/leftfield-geospatial/plan-rect'
+Source = 'https://github.com/leftfield-geospatial/plan-rect'
+
+[build-system]
+requires = ['setuptools>=61']
+build-backend = 'setuptools.build_meta'
+
+[tool.setuptools]
+packages = ['plan_rect']
+
+[tool.setuptools.dynamic]
+version = { attr = 'plan_rect.version.__version__' }
+
+[tool.ruff]
+line-length = 88
+format = { quote-style = 'single' }
+
+[tool.ruff.lint]
+select = [
+    'B', # flake8-bugbear
+    'E', # pycodestyle error
+    'F', # pyflakes
+    'I', # isort
+    'UP', # pyupgrade
+    'W', # pycodestyle warning
+    'RUF'
+]
