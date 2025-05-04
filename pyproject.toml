@@ -3,7 +3,7 @@ name = 'plan-rect'
 description = 'Rectify oblique images to a planar surface'
 readme = 'README.md'
 requires-python = '>=3.9'
-dependencies = ['orthority>=0.5.1']
+dependencies = ['orthority>=0.6.0']
 authors = [
     { name = 'Leftfield Geospatial', email = 'info@leftfield.online' }
 ]
