@@ -112,7 +112,7 @@ def _dir_cb(ctx: click.Context, param: click.Parameter, uri_path: str) -> OpenFi
     type=click.Path(dir_okay=False),
     default=None,
     callback=partial(_file_cb, mode='rt'),
-    help='Path / URI of an interior parameter file.',
+    help='Path / URI of an Orthority format interior parameter file.',
 )
 @click.option(
     '-m',
@@ -143,8 +143,8 @@ def _dir_cb(ctx: click.Context, param: click.Parameter, uri_path: str) -> OpenFi
     show_default='ground sampling distance',
     multiple=True,
     callback=_resolution_cb,
-    help="'Rectified pixel size in meters.  Can be used twice for non-square pixels: "
-    "'--res PIXEL_WIDTH --res PIXEL_HEIGHT'.",
+    help='Rectified pixel size in meters.  Can be used twice for non-square pixels: '
+    "'--res WIDTH --res HEIGHT'.",
 )
 @click.option(
     '-i',
@@ -169,8 +169,7 @@ def _dir_cb(ctx: click.Context, param: click.Parameter, uri_path: str) -> OpenFi
     type=click.BOOL,
     default=False,
     show_default=True,
-    help='Export interior parameters and markers to Orthority format file(s), '
-    'and exit.',
+    help='Export interior parameters and markers to Orthority format files and exit.',
 )
 @click.option(
     '-od',
