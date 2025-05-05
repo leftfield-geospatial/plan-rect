@@ -1,3 +1,5 @@
+[![Tests](https://github.com/leftfield-geospatial/plan-rect/actions/workflows/run-unit-tests.yml/badge.svg)](https://github.com/leftfield-geospatial/plan-rect/actions/workflows/run-unit-tests.yml)
+
 # Plan-Rect
 
 Plan-Rect is command line tool for rectifying oblique images to a plane.
