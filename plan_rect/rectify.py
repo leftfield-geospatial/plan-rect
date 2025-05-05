@@ -75,11 +75,12 @@ def rectify(
         click.echo(f'Using auto resolution: {gsd:.4e} (m)')
 
     # create grids for remapping
-    bounds = [*xy.min(axis=1), *xy.max(axis=1)]
-    x = np.arange(*bounds[::2], resolution[0])
-    # orient the y grid so that it increases bottom to top, then the remapped image
-    # will have the world coordinate origin in its bottom left
-    y = np.arange(*bounds[-1::-2], -resolution[1])
+    bounds = np.array([*xy.min(axis=1), *xy.max(axis=1)])
+    # find x,y ranges that include all pixels on, or inside the bounds
+    nxy = np.floor((bounds[2:] - bounds[:2]) / resolution) + 1
+    x = bounds[0] + np.arange(nxy[0]) * resolution[0]
+    # orient the y grid so that it increases bottom to top
+    y = bounds[3] - np.arange(nxy[1]) * resolution[1]
     xgrid, ygrid = np.meshgrid(x, y, indexing='xy')
     zgrid = np.zeros_like(xgrid)
 
