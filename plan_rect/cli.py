@@ -246,12 +246,16 @@ def cli(
             "Marker locations are required with either '-m' / '--marker' or '-g' / "
             "'--gcp'."
         )
+
     if markers:
         # convert marker locations to GCPs with pixel coordinates converted from BL to
         # TL origin convention
         gcps = [
             dict(
-                id=m[0], ji=(m[3], im_size[1] - m[4]), xyz=(m[1], m[2], 0.0), info=None
+                id=m[0],
+                ji=(m[3], im_size[1] - 1 - m[4]),
+                xyz=(m[1], m[2], 0.0),
+                info=None,
             )
             for m in markers
         ]
@@ -267,6 +271,7 @@ def cli(
                 param_hint="'-g' / '--gcp'.",
             )
         gcp_dict = {image_path.name: gcps}
+
     if len(gcps) < 3:
         raise click.UsageError('At least three markers are required.')
 
@@ -316,7 +321,7 @@ def cli(
 
     # create a rectified marker list, converting pixel coordinates from TL to BL
     # origin convention
-    rect_ji[1] = rect_array.shape[1] - rect_ji[1]
+    rect_ji[1] = rect_array.shape[1] - 1 - rect_ji[1]
     rect_markers = [
         dict(id=gcp.get('id'), ji=ji_mkr)
         for i, (gcp, ji_mkr) in enumerate(zip(gcps, rect_ji.T))
