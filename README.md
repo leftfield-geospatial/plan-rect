@@ -1,4 +1,6 @@
 [![Tests](https://github.com/leftfield-geospatial/plan-rect/actions/workflows/run-unit-tests.yml/badge.svg)](https://github.com/leftfield-geospatial/plan-rect/actions/workflows/run-unit-tests.yml)
+![PyPI - Version](https://img.shields.io/pypi/v/plan-rect?color=blue)
+
 
 # Plan-Rect
 
@@ -6,23 +8,10 @@ Plan-Rect is command line tool for rectifying oblique images to a plane.
 
 ## Installation
 
-Plan-Rect is a python 3 package that depends on [Orthority](https://github.com/leftfield-geospatial/orthority).  It has not yet been published to PyPI or conda-forge.  To install the package, first clone the repository: 
+Plan-Rect is a python 3 package that can be installed with [pip](<https://pip.pypa.io/>): 
 
 ```commandline
-git clone https://github.com/leftfield-geospatial/plan-rect.git
-cd plan-rect
-```
-
-Then use [``pip``](https://pip.pypa.io/) to install in editable mode:
-
-```commandline
-pip install -e .
-```
-
-If installing into a [``conda``](https://docs.anaconda.com/free/miniconda) environment, it is best to install Orthority with ``conda`` first, before running the command above:
-
-```commandline
-conda install -c conda-forge "orthority>=0.6.0"
+pip install plan-rect
 ```
 
 ## Usage
