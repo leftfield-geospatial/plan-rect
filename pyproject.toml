@@ -1,6 +1,6 @@
 [project]
 name = 'plan-rect'
-description = 'Rectify oblique images to a planar surface'
+description = 'Rectify oblique images to a plane'
 readme = 'README.md'
 requires-python = '>=3.9'
 dependencies = ['orthority>=0.6.0']
