@@ -17,25 +17,22 @@ import string
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 import pytest
 import rasterio as rio
 from click.testing import CliRunner
-from orthority.camera import FrameCamera, create_camera
-from orthority.enums import CameraType, Interp
-from orthority.param_io import (
-    read_oty_gcps,
-    read_oty_int_param,
-    write_gcps,
-    write_int_param,
-)
+from orthority.camera import Camera
+from orthority.enums import Interp
+from orthority.param_io import read_oty_gcps, write_gcps
 
+from plan_rect.camera import PerspectiveCamera
 from plan_rect.cli import cli
 from plan_rect.param_io import write_rectification_data
 from plan_rect.rectify import rectify
 
 
-def get_gcps(camera: FrameCamera, ji: np.ndarray) -> list[dict[str, Any]]:
+def get_gcps(camera: Camera, ji: np.ndarray) -> list[dict[str, Any]]:
     """Return a list of GCPs generated with the given camera and ji pixel
     coordinates.
     """
@@ -68,40 +65,45 @@ def runner():
 
 
 @pytest.fixture()
-def gradient_array() -> np.ndarray:
+def im_size() -> tuple[int, int]:
+    """A (width, height) image size."""
+    return (200, 100)
+
+
+@pytest.fixture()
+def gradient_array(im_size: tuple[int, int]) -> np.ndarray:
     """An asymmetrical gradient array."""
-    x = np.linspace(0, 1, 200)
-    y = np.linspace(0, 1, 100)
+    x = np.linspace(0, 1, im_size[0])
+    y = np.linspace(0, 1, im_size[1])
     xgrid, ygrid = np.meshgrid(x, y, indexing='xy')
     return (xgrid * ygrid * 250).astype('uint8')
 
 
 @pytest.fixture()
-def int_param(gradient_array: np.ndarray) -> dict[str, Any]:
-    """Pinhole camera interior parameters."""
-    im_size = gradient_array.shape[::-1]
-    return dict(
-        cam_type=CameraType.pinhole,
-        im_size=im_size,
-        focal_len=1.0,
-        sensor_size=(1.0, im_size[1] / im_size[0]),
-    )
-
-
-@pytest.fixture()
-def straight_camera(int_param: dict[str, Any]) -> FrameCamera:
-    """A pinhole camera aligned with world coordinate axes and positioned above the
-    world coordinate origin.
+def straight_tform(im_size: tuple[int, int]) -> np.ndarray:
+    """A perspective transform from world to pixel coordinates with aligned axes and
+    origins.
     """
-    return create_camera(**int_param, opk=(0.0, 0.0, 0.0), xyz=(0.0, 0.0, 1.0))
+    # tform[1, 1] is -ve as pixel and world y axes are flipped
+    tform = np.diag([1.0, -1.0, 1.0])
+    tform[:2, 2] = (np.array(im_size) - 1) / 2
+    return tform
 
 
 @pytest.fixture()
-def oblique_camera(int_param: dict[str, Any]) -> FrameCamera:
-    """A pinhole camera with an oblique world view."""
-    return create_camera(
-        **int_param, opk=np.radians((15.0, -5.0, 10.0)).tolist(), xyz=(1.0, 2.0, 3.0)
-    )
+def straight_camera(im_size: tuple[int, int], straight_tform: np.ndarray) -> Camera:
+    """A perspective camera aligned with world coordinate axes and origin."""
+    return PerspectiveCamera(im_size, straight_tform)
+
+
+@pytest.fixture()
+def oblique_camera(im_size: tuple[int, int], straight_tform: np.ndarray) -> Camera:
+    """A perspective camera with an oblique world view."""
+    oblique_tform = straight_tform.copy()
+    R = cv2.Rodrigues(np.radians((0.15, -0.05, 0.10)))[0]
+    oblique_tform = oblique_tform.dot(R)
+    oblique_tform /= oblique_tform[2, 2]
+    return PerspectiveCamera(im_size, oblique_tform)
 
 
 @pytest.fixture()
@@ -121,35 +123,24 @@ def gradient_image_file(gradient_array: np.ndarray, tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def int_param_file(int_param: dict[str, Any], tmp_path: Path) -> Path:
-    """An Orthority interior parameter file."""
-    file = tmp_path.joinpath('int_param.yaml')
-    int_param_dict = {'PR Camera': int_param}
-    write_int_param(file, int_param_dict)
-    return file
-
-
-@pytest.fixture()
-def gcp_ji(int_param: dict[str, Any]) -> np.ndarray:
+def gcp_ji(im_size: tuple[int, int]) -> np.ndarray:
     """A Numpy array of pixel coordinates for four GCPs."""
     buf = 10
-    w, h = (int_param['im_size'][0] - 1, int_param['im_size'][1] - 1)
+    w, h = (im_size[0] - 1, im_size[1] - 1)
     ji = [[buf, h - buf], [w - buf, h - buf], [w - buf, buf], [buf, buf]]
     return np.array(ji).T
 
 
 @pytest.fixture()
-def marker_ji(int_param: dict[str, Any], gcp_ji: np.ndarray) -> np.ndarray:
+def marker_ji(im_size: tuple[int, int], gcp_ji: np.ndarray) -> np.ndarray:
     """A Numpy array of pixel coordinates for four 'markers' (coordinate origin in
     bottom left image corner).
     """
-    return np.array([gcp_ji[0], int_param['im_size'][1] - 1 - gcp_ji[1]])
+    return np.array([gcp_ji[0], im_size[1] - 1 - gcp_ji[1]])
 
 
 @pytest.fixture()
-def straight_gcps(
-    straight_camera: FrameCamera, gcp_ji: np.ndarray
-) -> list[dict[str, Any]]:
+def straight_gcps(straight_camera: Camera, gcp_ji: np.ndarray) -> list[dict[str, Any]]:
     """A list of GCPs generated with 'straight_camera'."""
     return get_gcps(straight_camera, gcp_ji)
 
@@ -166,40 +157,42 @@ def straight_gcp_file(
 
 
 @pytest.fixture()
-def cli_focal_len_sensor_size_marker_str(
+def cli_marker_str(
     gradient_image_file: Path,
-    int_param: dict[str, Any],
     straight_gcps: list[dict[str, Any]],
     marker_ji: np.ndarray,
     gcp_ji: np.ndarray,
 ) -> str:
-    """A CLI string using the --focal-len, --sensor-size and --marker options."""
+    """A CLI string using the --marker option."""
     # create marker option strings
     marker_strs = [
-        f' -m {m_id} {gcp["xyz"][0]} {gcp["xyz"][1]} {m_ji[0]} {m_ji[1]} '
+        f' -m {m_id} {gcp["xyz"][0]} {gcp["xyz"][1]} {m_ji[0]} {m_ji[1]}'
         for m_id, m_ji, gcp in zip('ABCD', marker_ji.T, straight_gcps)
     ]
 
-    # create cli string
-    cli_str = (
-        f'-im {gradient_image_file} -fl {int_param["focal_len"]} -ss '
-        f'{int_param["sensor_size"][0]} {int_param["sensor_size"][1]}'
-    )
-    cli_str += ''.join(marker_strs)
-    return cli_str
+    return f'-im {gradient_image_file}' + ''.join(marker_strs)
 
 
 @pytest.fixture()
-def cli_int_param_gcp_str(
-    gradient_image_file: Path, int_param_file: dict[str, Any], straight_gcp_file: Path
-) -> str:
-    """A CLI string using the --int-param and --gcp options."""
-    cli_str = f'-im {gradient_image_file} -ip {int_param_file} -g {straight_gcp_file}'
-    return cli_str
+def cli_gcp_str(gradient_image_file: Path, straight_gcp_file: Path) -> str:
+    """A CLI string using the --gcp option."""
+    return f'-im {gradient_image_file} -g {straight_gcp_file}'
+
+
+@pytest.mark.parametrize('camera', ['straight_camera', 'oblique_camera'])
+def test_perspective_camera(
+    camera: str, gcp_ji: np.ndarray, request: pytest.FixtureRequest
+):
+    """Test camera.PerspectiveCamera."""
+    camera: PerspectiveCamera = request.getfixturevalue(camera)
+    test_xyz = camera.pixel_to_world_z(gcp_ji, z=0)
+    assert np.all(test_xyz[2] == 0)
+    test_ji = camera.world_to_pixel(test_xyz)
+    assert test_ji == pytest.approx(gcp_ji, abs=1e-9)
 
 
 def test_rectify(
-    straight_camera: FrameCamera, gradient_image_file: Path, gradient_array: np.ndarray
+    straight_camera: Camera, gradient_image_file: Path, gradient_array: np.ndarray
 ):
     """Test rectify.rectify() with auto resolution."""
     # the camera looks straight down on world coordinates so that the rectified image
@@ -209,12 +202,12 @@ def test_rectify(
     )
 
     assert (rect_array[0] == gradient_array).all()
-    assert transform == (0.005, 0, -0.5, 0, -0.005, 0.25)
+    assert transform == (1, 0, -100, 0, -1, 50)
 
 
-def test_rectify_resolution(straight_camera: FrameCamera, gradient_image_file: Path):
+def test_rectify_resolution(straight_camera: Camera, gradient_image_file: Path):
     """Test the rectify.rectify() resolution parameter."""
-    res = (0.02, 0.01)
+    res = (4, 2)
     rect_array, transform = rectify(
         gradient_image_file, straight_camera, resolution=res, interp='average'
     )
@@ -222,11 +215,11 @@ def test_rectify_resolution(straight_camera: FrameCamera, gradient_image_file: P
     assert (transform[0], abs(transform[4])) == res
 
 
-def test_rectify_interp(straight_camera: FrameCamera, gradient_image_file: Path):
+def test_rectify_interp(straight_camera: Camera, gradient_image_file: Path):
     """Test the rectify.rectify() interp parameter."""
     rect_arrays = []
     # use a resolution that gives non-integer remap maps to force interpolation
-    res = (0.011, 0.011)
+    res = (2.1, 2.1)
     for interp in [Interp.nearest, Interp.cubic]:
         rect_array, _ = rectify(
             gradient_image_file, straight_camera, interp=interp, resolution=res
@@ -238,7 +231,7 @@ def test_rectify_interp(straight_camera: FrameCamera, gradient_image_file: Path)
     assert (rect_arrays[0] != rect_arrays[1]).any()
 
 
-def test_rectify_nodata(oblique_camera: FrameCamera, gradient_image_file: Path):
+def test_rectify_nodata(oblique_camera: Camera, gradient_image_file: Path):
     """Test the rectify.rectify() nodata parameter."""
     rect_masks = []
     for nodata in [254, 255]:
@@ -252,39 +245,37 @@ def test_rectify_nodata(oblique_camera: FrameCamera, gradient_image_file: Path):
 
 
 def test_write_rectification_data(
-    int_param: dict, marker_ji: np.ndarray, tmp_path: Path
+    im_size: tuple[int, int], marker_ji: np.ndarray, tmp_path: Path
 ):
     """Test param_io.write_rectification_data()."""
     src_name = 'source.jpg'
     ids = 'ABCD'
     markers = [dict(id=mkr_id, ji=mkr_ji) for mkr_id, mkr_ji in zip(ids, marker_ji.T)]
     out_file = tmp_path.joinpath('pixeldata.txt')
-    write_rectification_data(out_file, src_name, int_param, markers)
+    write_rectification_data(out_file, src_name, im_size, markers)
     assert out_file.exists()
 
     # rough check of contents
     with open(out_file) as f:
         lines = f.readlines()
-    prefixes = ['Photo', 'Size', 'Lens', 'Sensor', *ids]
+    prefixes = ['Photo', 'Size', *ids]
     assert len(lines) == len(prefixes)
     assert all([line.startswith(start + ';') for start, line in zip(prefixes, lines)])
     for line, mkr_ji in zip(lines[-len(markers) :], marker_ji.T):
         assert f'{mkr_ji[0]:.4f},{mkr_ji[1]:.4f}' in line
 
 
-def test_write_rectification_data_overwrite(int_param: dict, tmp_path: Path):
+def test_write_rectification_data_overwrite(im_size: tuple[int, int], tmp_path: Path):
     """Test the param_io.write_rectification_data() overwrite parameter."""
     out_file = tmp_path.joinpath('pixeldata.txt')
     out_file.touch()
     with pytest.raises(FileExistsError):
-        write_rectification_data(out_file, 'source.jpg', int_param, [])
-    write_rectification_data(out_file, 'source.jpg', int_param, [], overwrite=True)
+        write_rectification_data(out_file, 'source.jpg', im_size, [])
+    write_rectification_data(out_file, 'source.jpg', im_size, [], overwrite=True)
     assert out_file.exists()
 
 
-@pytest.mark.parametrize(
-    'cli_str', ['cli_focal_len_sensor_size_marker_str', 'cli_int_param_gcp_str']
-)
+@pytest.mark.parametrize('cli_str', ['cli_marker_str', 'cli_gcp_str'])
 def test_cli_outputs(
     cli_str: str,
     marker_ji: np.ndarray,
@@ -293,9 +284,7 @@ def test_cli_outputs(
     tmp_path: Path,
     request: pytest.FixtureRequest,
 ):
-    """Tes the accuracy of CLI output files with different interior parameter and
-    marker location options.
-    """
+    """Tes the accuracy of CLI output files with different marker location options."""
     cli_str: str = request.getfixturevalue(cli_str)
     # run the command
     cli_str += f' -od {tmp_path}'
@@ -317,15 +306,15 @@ def test_cli_outputs(
     # the camera looks straight down on world coordinates so that the rectified image
     # should ~match the source image, and rectified marker pixel coordinates ~match
     # the input marker pixel coordinates
-    assert transform[:6] == pytest.approx((0.005, 0, -0.5, 0, -0.005, 0.25), abs=1e-6)
+    assert transform[:6] == pytest.approx((1, 0, -100, 0, -1, 50), abs=1e-4)
     assert rect_array[0] == pytest.approx(gradient_array, abs=1)
-    assert rect_ji == pytest.approx(marker_ji, abs=1)
+    assert rect_ji == pytest.approx(marker_ji, abs=0.1)
 
 
-def test_cli_resolution(cli_int_param_gcp_str: str, runner: CliRunner, tmp_path: Path):
+def test_cli_resolution(cli_gcp_str: str, runner: CliRunner, tmp_path: Path):
     """Tes the CLI --res option."""
-    res = (0.02, 0.01)
-    cli_str = cli_int_param_gcp_str + f' -r {res[0]} -r {res[1]} -od {tmp_path}'
+    res = (4, 2)
+    cli_str = cli_gcp_str + f' -r {res[0]} -r {res[1]} -od {tmp_path}'
     res_ = runner.invoke(cli, cli_str.split())
     assert res_.exit_code == 0
 
@@ -335,11 +324,7 @@ def test_cli_resolution(cli_int_param_gcp_str: str, runner: CliRunner, tmp_path:
         assert rect_im.res == res
 
 
-def test_cli_interp(
-    cli_int_param_gcp_str: str,
-    runner: CliRunner,
-    tmp_path: Path,
-):
+def test_cli_interp(cli_gcp_str: str, runner: CliRunner, tmp_path: Path):
     """Tes the CLI --interp option."""
     # create rectified images with different interpolation types
     out_dirs = []
@@ -348,7 +333,7 @@ def test_cli_interp(
         out_dir.mkdir()
         out_dirs.append(out_dir)
         # use a resolution that gives non-integer remap maps to force interpolation
-        cli_str = cli_int_param_gcp_str + f' -i {interp} -r 0.011 -od {out_dir}'
+        cli_str = cli_gcp_str + f' -i {interp} -r 2.1 -od {out_dir}'
         res_ = runner.invoke(cli, cli_str.split())
         assert res_.exit_code == 0
 
@@ -365,10 +350,9 @@ def test_cli_interp(
 
 
 def test_cli_nodata(
-    oblique_camera: FrameCamera,
+    oblique_camera: Camera,
     gcp_ji: np.ndarray,
     gradient_image_file: Path,
-    int_param_file: Path,
     runner: CliRunner,
     tmp_path: Path,
 ):
@@ -382,7 +366,7 @@ def test_cli_nodata(
     # rectify with different --nodata vals
     out_dirs = []
     nodatas = [254, 255]  # image vals are <= 250
-    cli_common_str = f'-im {gradient_image_file} -ip {int_param_file} -g {gcp_file}'
+    cli_common_str = f'-im {gradient_image_file} -g {gcp_file}'
     for nodata in nodatas:
         out_dir = tmp_path.joinpath(str(nodata))
         out_dir.mkdir()
@@ -405,38 +389,32 @@ def test_cli_nodata(
     assert (rect_masks[1] == rect_masks[0]).all()
 
 
-def test_cli_overwrite(cli_int_param_gcp_str: str, runner: CliRunner, tmp_path: Path):
+def test_cli_overwrite(cli_gcp_str: str, runner: CliRunner, tmp_path: Path):
     """Tes the CLI --overwrite option."""
     rect_image_file = tmp_path.joinpath('rect.png')
     rect_image_file.touch()
-    cli_str = cli_int_param_gcp_str + f' -od {tmp_path}'
+    cli_str = cli_gcp_str + f' -od {tmp_path}'
     res = runner.invoke(cli, cli_str.split())
     assert res.exit_code != 0
-    cli_str = cli_int_param_gcp_str + f' -o -od {tmp_path} '
+    cli_str = cli_gcp_str + f' -o -od {tmp_path} '
     res = runner.invoke(cli, cli_str.split())
     assert res.exit_code == 0
 
 
 def test_cli_export_params(
-    cli_focal_len_sensor_size_marker_str: str,
+    cli_marker_str: str,
     gradient_image_file: Path,
-    int_param: dict[str, Any],
     straight_gcps: list[dict[str, Any]],
     runner: CliRunner,
     tmp_path: Path,
 ):
     """Tes the CLI --export-params option."""
-    cli_str = cli_focal_len_sensor_size_marker_str + f' -ep -od {tmp_path}'
+    cli_str = cli_marker_str + f' -ep -od {tmp_path}'
     res_ = runner.invoke(cli, cli_str.split())
     assert res_.exit_code == 0
 
-    int_param_file = tmp_path.joinpath('int_param.yaml')
     gcp_file = tmp_path.joinpath('gcps.geojson')
-    assert int_param_file.exists()
     assert gcp_file.exists()
-
-    test_int_param_dict = read_oty_int_param(int_param_file)
-    assert next(iter(test_int_param_dict.values())) == int_param
 
     ref_gcp_dict = {gradient_image_file.name: straight_gcps}
     test_gcp_dict = read_oty_gcps(gcp_file)
