@@ -16,14 +16,11 @@ pip install plan-rect
 
 ## Usage
 
-Rectification is performed with the ``plan-rect`` command.  It requires an image, camera interior parameters and marker locations as inputs, and creates a rectified image and rectification data file as outputs.  Its options are described below:
+Rectification is performed with the ``plan-rect`` command.  It requires an image and marker locations as inputs, and creates a rectified image and rectification data file as outputs.  Its options are described below:
 
 | Option                        | Value                                                          | Description                                                                                                                                        |
 |-------------------------------|----------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
 | ``-im`` / ``--image``         | FILE                                                           | Path / URI of the source image (required).                                                                                                         |
-| ``-fl`` / ``--focal-len``     | FLOAT                                                          | Camera focal length (any units).                                                                                                                   |
-| ``-ss`` / ``--sensor-size``   | WIDTH HEIGHT                                                   | Camera sensor size in the same units as ``-fl`` / ``--focal-len``.                                                                                 |
-| ``-ip`` / ``--int-param``     | FILE                                                           | Path / URI of an Orthority format interior parameter file.                                                                                         |
 | ``-m`` / ``--marker``         | ID X Y COL ROW                                                 | Marker ID and location in world and pixel coordinates, with pixel coordinate origin at the bottom left image corner.                               | 
 | ``-g`` / ``--gcp``            | FILE                                                           | Path / URI of an Orthority GCP file defining marker locations.                                                                                     |
 | ``-r`` / ``--res``            | FLOAT                                                          | Rectified pixel size in meters.  Can be used twice for non-square pixels: ``--res WIDTH --res HEIGHT``.  Defaults to the ground sampling distance. |
@@ -35,35 +32,33 @@ Rectification is performed with the ``plan-rect`` command.  It requires an image
 | ``--version``                 |                                                                | Show the version and exit.                                                                                                                         |
 | ``--help``                    |                                                                | Show the help and exit.                                                                                                                            |
 
-Camera interior parameters are required with either ``-fl`` / ``--focal-len`` and ``-ss`` / ``--sensor-size``, or ``-ip`` / ``--int-param``.  
-
-Marker locations are required with either ``-m`` / ``--marker`` or ``-g`` / ``--gcp``.  The ``-m`` / ``--marker`` option can be provided multiple times. At least three markers are required. 
+Marker locations are required with either ``-m`` / ``--marker`` or ``-g`` / ``--gcp``.  The ``-m`` / ``--marker`` option can be provided multiple times. At least four markers are required. 
 
 
 ### Examples
 
-Supply interior parameters with ``-fl`` / ``--focal-len`` and ``-ss`` / ``--sensor-size``, and marker locations with ``-m`` / ``--marker``:
+Supply marker locations with ``-m`` / ``--marker``:
 
 ```commandline
-plan-rect --image source.jpg --focal-len 50 --sensor-size 31.290 23.491 --marker A 0 0 1002 1221 --marker B 2.659 0 4261 1067 --marker C 2.321 5.198 3440 3706 --marker D -0.313 4.729 1410 3663
+plan-rect --image source.jpg --marker A 0 0 1002 1221 --marker B 2.659 0 4261 1067 --marker C 2.321 5.198 3440 3706 --marker D -0.313 4.729 1410 3663
 ```
 
-Supply interior parameters with ``-ip`` / ``--int-param``  and marker locations with ``-g`` / ``--gcp``:
+Supply marker locations with ``-g`` / ``--gcp``:
 
 ```commandline
-plan-rect --image source.jpg --int-param int_param.yaml --gcp gcps.geojson
+plan-rect --image source.jpg --gcp gcps.geojson
 ```
 
 Set the rectified image pixel size with ``-r`` / ``--res``:
 
 ```commandline
-plan-rect --image source.jpg --res 0.01 --int-param int_param.yaml --gcp gcps.geojson
+plan-rect --image source.jpg --res 0.01 --gcp gcps.geojson
 ```
 
-Export interior parameters and marker locations to Orthority format files in the ``data`` directory, overwriting existing outputs:
+Export marker locations to an Orthority GCP file in the ``data`` directory, overwriting any existing file:
 
 ```commandline
-plan-rect --image source.jpg --export-params --out-dir data --overwrite --focal-len 50 --sensor-size 31.290 23.491 --marker A 0 0 1002 1221 --marker B 2.659 0 4261 1067 --marker C 2.321 5.198 3440 3706 --marker D -0.313 4.729 1410 3663
+plan-rect --image source.jpg --export-params --out-dir data --overwrite --marker A 0 0 1002 1221 --marker B 2.659 0 4261 1067 --marker C 2.321 5.198 3440 3706 --marker D -0.313 4.729 1410 3663
 ```
 
 ## Licence
