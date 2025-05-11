@@ -24,7 +24,7 @@ from orthority.common import Open
 def write_rectification_data(
     file: str | PathLike | OpenFile,
     src_name: str,
-    int_param: dict[str, Any],
+    im_size: tuple[int, int],
     markers: list[dict[str, Any]],
     overwrite: bool = False,
 ):
@@ -37,8 +37,8 @@ def write_rectification_data(
         mode (``'wt'``).
     :param src_name:
         Source image file name.
-    :param int_param:
-        Camera interior parameters.
+    :param im_size:
+        Image (width, height) in pixels.
     :param markers:
         Markers as a list of dictionaries with ``id``: <marker name>, and ``ji``:
         <pixel coordinate> items.
@@ -47,20 +47,7 @@ def write_rectification_data(
     """
     with Open(file, 'wt', overwrite=overwrite) as f:
         f.write(f'Photo;{src_name}\n')
-        im_size = int_param['im_size']
         f.write(f'Size;{im_size[0]},{im_size[1]};px\n')
-
-        focal_len = int_param['focal_len']
-        focal_str = (
-            f'{focal_len:.4f}'
-            if not isinstance(focal_len, tuple)
-            else f'{focal_len[0]:.4f},{focal_len[1]:.4f}'
-        )
-        f.write(f'Lens;{focal_str};?\n')
-
-        if 'sensor_size' in int_param:
-            sensor_size = int_param['sensor_size']
-            f.write(f'Sensor;{sensor_size[0]:.4f},{sensor_size[1]:.4f};?\n')
 
         for m in markers:
             f.write(f'{m["id"]};{m["ji"][0]:.4f},{m["ji"][1]:.4f},0\n')

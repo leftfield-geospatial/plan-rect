@@ -20,19 +20,18 @@ from functools import partial
 from pathlib import Path
 
 import click
+import cv2
 import fsspec
 import numpy as np
 import rasterio as rio
 from fsspec.core import OpenFile
 from orthority import param_io
-from orthority.camera import create_camera
 from orthority.common import OpenRaster, join_ofile
-from orthority.enums import CameraType, Interp
-from orthority.fit import fit_frame_exterior
+from orthority.enums import Interp
 from rasterio.errors import NotGeoreferencedWarning
 
 from plan_rect.param_io import write_rectification_data
-from plan_rect.rectify import rectify
+from plan_rect.rectify import PerspectiveCamera, rectify
 from plan_rect.version import __version__
 
 
@@ -91,30 +90,6 @@ def _dir_cb(ctx: click.Context, param: click.Parameter, uri_path: str) -> OpenFi
     help='Path / URI of the source image.',
 )
 @click.option(
-    '-fl',
-    '--focal-len',
-    type=click.FLOAT,
-    default=None,
-    help='Camera focal length.',
-)
-@click.option(
-    '-ss',
-    '--sensor-size',
-    type=(float, float),
-    metavar='WIDTH HEIGHT',
-    default=None,
-    help='Camera sensor size in the same units as --focal-len.',
-)
-@click.option(
-    '-ip',
-    '--int-param',
-    'int_param_file',
-    type=click.Path(dir_okay=False),
-    default=None,
-    callback=partial(_file_cb, mode='rt'),
-    help='Path / URI of an Orthority format interior parameter file.',
-)
-@click.option(
     '-m',
     '--marker',
     'markers',
@@ -169,7 +144,7 @@ def _dir_cb(ctx: click.Context, param: click.Parameter, uri_path: str) -> OpenFi
     type=click.BOOL,
     default=False,
     show_default=True,
-    help='Export interior parameters and markers to Orthority format files and exit.',
+    help='Export markers to an Orthority GCP file and exit.',
 )
 @click.option(
     '-od',
@@ -194,9 +169,6 @@ def _dir_cb(ctx: click.Context, param: click.Parameter, uri_path: str) -> OpenFi
 def cli(
     ctx: click.Context,
     image_file: OpenFile,
-    focal_len: float,
-    sensor_size: tuple[float, float],
-    int_param_file: OpenFile,
     markers: tuple[tuple[str, float, float, float, float]],
     gcp_file: OpenFile,
     export_params: bool,
@@ -206,38 +178,14 @@ def cli(
 ):
     """Rectify an image onto a plane.
 
-    Camera interior parameters are required with either '-fl' / '--focal-len' and
-    '-ss' / '--sensor-size', or '-ip' / '--int-param'.
-
     Marker locations are required with either '-m' / '--marker' or '-g' / '--gcp'.
-    The '-m' / '--marker' option can be provided multiple times.  At least three
+    The '-m' / '--marker' option can be provided multiple times.  At least four
     markers are required.
     """
     # silence not georeferenced warnings
     warnings.simplefilter('ignore', category=NotGeoreferencedWarning)
     # enter rasterio environment
     ctx.with_resource(rio.Env(GDAL_NUM_THREADS='ALL_CPUS', GTIFF_FORCE_RGBA=False))
-
-    # form an interior parameter dictionary
-    if (focal_len is None or not sensor_size) and not int_param_file:
-        raise click.UsageError(
-            "Interior parameters are required with '-fl' / '--focal-len' and '-ss' "
-            "/'--sensor-size', or '-ip' / '--int-param'."
-        )
-    if focal_len and sensor_size:
-        with OpenRaster(image_file, 'r') as src_im:
-            im_size = src_im.shape[::-1]
-        int_param = dict(
-            cam_type=CameraType.pinhole,
-            im_size=im_size,
-            focal_len=focal_len,
-            sensor_size=sensor_size,
-        )
-        int_param_dict = {'PR-Camera': int_param}
-    else:
-        int_param_dict = param_io.read_oty_int_param(int_param_file)
-        int_param = next(iter(int_param_dict.values()))
-        im_size = int_param['im_size']
 
     # form a GCP dictionary
     image_path = Path(image_file.path)
@@ -246,6 +194,8 @@ def cli(
             "Marker locations are required with either '-m' / '--marker' or '-g' / "
             "'--gcp'."
         )
+    with OpenRaster(image_file, 'r') as src_im:
+        im_size = src_im.shape[::-1]
 
     if markers:
         # convert marker locations to GCPs with pixel coordinates converted from BL to
@@ -272,29 +222,28 @@ def cli(
             )
         gcp_dict = {image_path.name: gcps}
 
-    if len(gcps) < 3:
-        raise click.UsageError('At least three markers are required.')
+    if len(gcps) < 4:
+        raise click.UsageError('At least four markers are required.')
 
     if export_params:
         # export interior parameters and GCPs as orthority format files, and exit
         gcp_file = join_ofile(out_dir, 'gcps.geojson', mode='wt')
         param_io.write_gcps(gcp_file, gcp_dict, overwrite=overwrite)
-        int_param_file = join_ofile(out_dir, 'int_param.yaml', mode='wt')
-        param_io.write_int_param(int_param_file, int_param_dict, overwrite=overwrite)
-        click.echo(f"Orthority format files written to: '{out_dir.path}'.")
+        click.echo(f"Orthority GCP file written to: '{gcp_file.path}'.")
         return
 
-    # fit exterior parameters & create camera
-    ext_param_dict = fit_frame_exterior(int_param_dict, gcp_dict)
-    ext_param = next(iter(ext_param_dict.values()))
-    cam = create_camera(**int_param, xyz=ext_param['xyz'], opk=ext_param['opk'])
+    # fit perspective transform & create camera
+    gcp_ji = np.array([gcp['ji'] for gcp in gcps]).T
+    gcp_xyz = np.array([gcp['xyz'] for gcp in gcps]).T
+    tform, _ = cv2.findHomography(
+        gcp_xyz[:2].T.astype('float32'), gcp_ji.T.astype('float32')
+    )
+    cam = PerspectiveCamera(im_size, tform)
 
     # find & print fitting error
-    gcp_xyz = np.array([gcp['xyz'] for gcp in gcps]).T
-    gcp_ji = np.array([gcp['ji'] for gcp in gcps]).T
     cam_ji = cam.world_to_pixel(gcp_xyz)
     err = np.sqrt(np.sum((gcp_ji - cam_ji) ** 2, axis=0)).mean()
-    click.echo(f'RMS fitting error: {err:.4f} (pixels).')
+    click.echo(f'RMS fitting error: {err:.4e} (pixels).')
 
     # rectify
     rect_array, transform = rectify(image_file, cam, **kwargs)
@@ -315,9 +264,8 @@ def cli(
     # find pixel coordinates of markers in the rectified image (0.5 translation
     # shifts the transform from the GDAL / Rasterio convention to give integer
     # coordinates that refer to pixel centers)
-    cam_xyz = cam.pixel_to_world_z(gcp_ji, z=0)
     inv_transform = ~(rio.Affine(*transform) * rio.Affine.translation(0.5, 0.5))
-    rect_ji = np.array(inv_transform * cam_xyz[:2])
+    rect_ji = np.array(inv_transform * gcp_xyz[:2])
 
     # create a rectified marker list, converting pixel coordinates from TL to BL
     # origin convention
@@ -330,11 +278,7 @@ def cli(
     # write rectification data
     rect_data_file = join_ofile(out_dir, 'pixeldata.txt', mode='wt')
     write_rectification_data(
-        rect_data_file,
-        image_path.name,
-        int_param,
-        rect_markers,
-        overwrite=overwrite,
+        rect_data_file, image_path.name, im_size, rect_markers, overwrite=overwrite
     )
     click.echo(f"Output files written to: '{out_dir.path}'.")
 
