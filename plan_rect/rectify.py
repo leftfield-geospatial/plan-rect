@@ -20,7 +20,7 @@ import click
 import numpy as np
 import rasterio as rio
 from fsspec.core import OpenFile
-from orthority.camera import FrameCamera
+from orthority.camera import Camera
 from orthority.common import OpenRaster
 from orthority.enums import Interp
 
@@ -38,7 +38,7 @@ def _area_poly(coords: np.ndarray) -> float:
 
 def rectify(
     src_file: str | PathLike | OpenFile,
-    camera: FrameCamera,
+    camera: Camera,
     resolution: tuple[float, float] | None = None,
     interp: str | Interp = Interp.cubic,
     nodata: int | float | None = None,

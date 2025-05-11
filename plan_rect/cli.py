@@ -30,8 +30,9 @@ from orthority.common import OpenRaster, join_ofile
 from orthority.enums import Interp
 from rasterio.errors import NotGeoreferencedWarning
 
+from plan_rect.camera import PerspectiveCamera
 from plan_rect.param_io import write_rectification_data
-from plan_rect.rectify import PerspectiveCamera, rectify
+from plan_rect.rectify import rectify
 from plan_rect.version import __version__
 
 
