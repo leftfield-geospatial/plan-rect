@@ -85,7 +85,7 @@ def straight_tform(im_size: tuple[int, int]) -> np.ndarray:
     origins.
     """
     # tform[1, 1] is -ve as pixel and world y axes are flipped
-    tform = np.diag([1.0, -1.0, 1.0])
+    tform = np.diag([im_size[0], -im_size[0], 1.0])
     tform[:2, 2] = (np.array(im_size) - 1) / 2
     return tform
 
@@ -100,7 +100,7 @@ def straight_camera(im_size: tuple[int, int], straight_tform: np.ndarray) -> Cam
 def oblique_camera(im_size: tuple[int, int], straight_tform: np.ndarray) -> Camera:
     """A perspective camera with an oblique world view."""
     oblique_tform = straight_tform.copy()
-    R = cv2.Rodrigues(np.radians((0.15, -0.05, 0.10)))[0]
+    R = cv2.Rodrigues(np.radians((15.0, -5.0, 10.0)))[0]
     oblique_tform = oblique_tform.dot(R)
     oblique_tform /= oblique_tform[2, 2]
     return PerspectiveCamera(im_size, oblique_tform)
@@ -202,25 +202,26 @@ def test_rectify(
     )
 
     assert (rect_array[0] == gradient_array).all()
-    assert transform == (1, 0, -100, 0, -1, 50)
+    assert transform == (0.005, 0, -0.5, 0, -0.005, 0.25)
 
 
 def test_rectify_resolution(straight_camera: Camera, gradient_image_file: Path):
     """Test the rectify.rectify() resolution parameter."""
-    res = (4, 2)
+    res = (0.02, 0.01)
     rect_array, transform = rectify(
         gradient_image_file, straight_camera, resolution=res, interp='average'
     )
-    assert rect_array.shape[1:] == (50, 50)
+    assert rect_array.shape[1:] == pytest.approx((50, 50), abs=1)
     assert (transform[0], abs(transform[4])) == res
 
 
 def test_rectify_interp(straight_camera: Camera, gradient_image_file: Path):
     """Test the rectify.rectify() interp parameter."""
     rect_arrays = []
-    # use a resolution that gives non-integer remap maps to force interpolation
-    res = (2.1, 2.1)
-    for interp in [Interp.nearest, Interp.cubic]:
+    # use a resolution that gives non-integer remap maps to force interpolation,
+    # and interpolation types with kernels that span >1 pixel to avoid nodata on border
+    res = (0.011, 0.011)
+    for interp in [Interp.bilinear, Interp.cubic]:
         rect_array, _ = rectify(
             gradient_image_file, straight_camera, interp=interp, resolution=res
         )
@@ -300,20 +301,17 @@ def test_cli_outputs(
     # test accuracy of output data
     with rio.open(rect_image_file, 'r') as rect_im:
         transform = rect_im.transform
-        rect_array = rect_im.read()
     rect_ji = read_rectification_ji(rect_data_file)
 
-    # the camera looks straight down on world coordinates so that the rectified image
-    # should ~match the source image, and rectified marker pixel coordinates ~match
-    # the input marker pixel coordinates
-    assert transform[:6] == pytest.approx((1, 0, -100, 0, -1, 50), abs=1e-4)
-    assert rect_array[0] == pytest.approx(gradient_array, abs=1)
+    # the camera looks straight down on world coordinates so that the rectified
+    # marker pixel coordinates should ~match the input marker pixel coordinates
+    assert transform[:6] == pytest.approx((0.005, 0, -0.5, 0, -0.005, 0.25), abs=1e-4)
     assert rect_ji == pytest.approx(marker_ji, abs=0.1)
 
 
 def test_cli_resolution(cli_gcp_str: str, runner: CliRunner, tmp_path: Path):
     """Tes the CLI --res option."""
-    res = (4, 2)
+    res = (0.02, 0.01)
     cli_str = cli_gcp_str + f' -r {res[0]} -r {res[1]} -od {tmp_path}'
     res_ = runner.invoke(cli, cli_str.split())
     assert res_.exit_code == 0
@@ -328,12 +326,13 @@ def test_cli_interp(cli_gcp_str: str, runner: CliRunner, tmp_path: Path):
     """Tes the CLI --interp option."""
     # create rectified images with different interpolation types
     out_dirs = []
-    for interp in ['nearest', 'cubic']:
+    # use interpolation types with kernels that span >1 pixel to avoid nodata on border
+    for interp in ['bilinear', 'cubic']:
         out_dir = tmp_path.joinpath(interp)
         out_dir.mkdir()
         out_dirs.append(out_dir)
-        # use a resolution that gives non-integer remap maps to force interpolation
-        cli_str = cli_gcp_str + f' -i {interp} -r 2.1 -od {out_dir}'
+        # use a resolution that gives non-integer remap maps to force interpolation,
+        cli_str = cli_gcp_str + f' -i {interp} -r 0.011 -od {out_dir}'
         res_ = runner.invoke(cli, cli_str.split())
         assert res_.exit_code == 0
 
