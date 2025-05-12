@@ -13,4 +13,4 @@
 # You should have received a copy of the GNU Affero General Public License along with
 # Plan-Rect. If not, see <https://www.gnu.org/licenses/>.
 
-__version__ = '0.1.0'
+__version__ = '0.2.0'
